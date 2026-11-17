@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: costpulse
+          POSTGRES_USER: costpulse
+          POSTGRES_PASSWORD: costpulse
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U costpulse" --health-interval 5s --health-retries 10
+    strategy:
+      matrix:
+        database: [sqlite, postgres]
+    env:
+      POSTGRES_HOST: ${{ matrix.database == 'postgres' && 'localhost' || '' }}
+      POSTGRES_PASSWORD: costpulse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run python manage.py makemigrations --check --dry-run
+      - run: uv run pytest -q
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and smoke-test the stack
+        run: |
+          docker compose up -d --build --wait
+          for i in $(seq 1 60); do curl -sf localhost:8000/health/ && break; sleep 5; done
+          curl -sf localhost:8000/api/inflation/latest/ | python3 -c "import json,sys; d=json.load(sys.stdin); assert d[0]['city']=='national', d; print(d[0])"
+      - if: failure()
+        run: docker compose logs

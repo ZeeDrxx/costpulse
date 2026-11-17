@@ -1,0 +1,90 @@
+// CostPulse — DAX for the Power BI report.
+// Tables come from the PostgreSQL views: bi_dim_city, bi_dim_product, bi_fact_price,
+// bi_fact_forecast, bi_ingestion_run, bi_model_run. See powerbi/README.md for the steps.
+
+// ---------------------------------------------------------------- calculated table: Months
+// One row per month that has a price or a forecast. Relate Months[month] (1) → bi_fact_price[month] (*)
+// and Months[month] (1) → bi_fact_forecast[month] (*).
+Months =
+VAR m = DISTINCT ( UNION ( VALUES ( bi_fact_price[month] ), VALUES ( bi_fact_forecast[month] ) ) )
+RETURN
+    ADDCOLUMNS (
+        SELECTCOLUMNS ( m, "month", [month] ),
+        "Year", YEAR ( [month] ),
+        "Month label", FORMAT ( [month], "mmm yyyy" ),
+        "Month sort", YEAR ( [month] ) * 100 + MONTH ( [month] )
+    )
+// Sort "Month label" by "Month sort" (Column tools → Sort by column).
+
+// ---------------------------------------------------------------- measures (home table: bi_fact_price)
+
+Avg Price = AVERAGE ( bi_fact_price[price] )
+
+Samples = SUM ( bi_fact_price[samples] )
+
+Latest Month =
+CALCULATE ( MAX ( bi_fact_price[month] ), REMOVEFILTERS ( Months ) )
+
+Price YoY % =
+VAR m = MAX ( Months[month] )
+VAR cur = CALCULATE ( [Avg Price], Months[month] = m )
+VAR prev = CALCULATE ( [Avg Price], Months[month] = EDATE ( m, -12 ) )
+RETURN DIVIDE ( cur - prev, prev )
+
+// Fixed-base, fixed-weight basket index, the same method as prices/analytics.py:
+// 100 · Σ w·(p_t / p_base) / Σ w, over products priced in both months.
+Price Index =
+VAR m = MAX ( Months[month] )
+VAR base = CALCULATE ( MIN ( bi_fact_price[month] ), REMOVEFILTERS ( Months ) )
+VAR rows =
+    ADDCOLUMNS (
+        VALUES ( bi_dim_product[product_id] ),
+        "@w", CALCULATE ( MAX ( bi_dim_product[basket_weight] ) ),
+        "@p", CALCULATE ( [Avg Price], Months[month] = m ),
+        "@p0", CALCULATE ( [Avg Price], Months[month] = base )
+    )
+VAR priced = FILTER ( rows, NOT ISBLANK ( [@p] ) && NOT ISBLANK ( [@p0] ) )
+RETURN 100 * DIVIDE ( SUMX ( priced, [@w] * [@p] / [@p0] ), SUMX ( priced, [@w] ) )
+
+Index YoY % =
+VAR m = MAX ( Months[month] )
+VAR cur = CALCULATE ( [Price Index], Months[month] = m )
+VAR prev = CALCULATE ( [Price Index], Months[month] = EDATE ( m, -12 ) )
+RETURN DIVIDE ( cur - prev, prev )
+
+// Population-weighted across the cities in the current filter (all cities → national figure).
+National Index =
+VAR rows =
+    ADDCOLUMNS (
+        VALUES ( bi_dim_city[city_id] ),
+        "@pop", CALCULATE ( MAX ( bi_dim_city[population] ) ),
+        "@idx", [Price Index]
+    )
+RETURN DIVIDE ( SUMX ( FILTER ( rows, NOT ISBLANK ( [@idx] ) ), [@pop] * [@idx] ),
+                SUMX ( FILTER ( rows, NOT ISBLANK ( [@idx] ) ), [@pop] ) )
+
+National YoY % =
+VAR m = MAX ( Months[month] )
+VAR cur = CALCULATE ( [National Index], Months[month] = m )
+VAR prev = CALCULATE ( [National Index], Months[month] = EDATE ( m, -12 ) )
+RETURN DIVIDE ( cur - prev, prev )
+
+// ---------------------------------------------------------------- forecasts (home table: bi_fact_forecast)
+
+Forecast Price = AVERAGE ( bi_fact_forecast[price] )
+Forecast Lower = AVERAGE ( bi_fact_forecast[lower] )
+Forecast Upper = AVERAGE ( bi_fact_forecast[upper] )
+
+// Actuals and forecast on one line chart: actual until the last observed month, forecast after.
+Price (actual + forecast) =
+IF ( MAX ( Months[month] ) <= [Latest Month], [Avg Price], [Forecast Price] )
+
+// ---------------------------------------------------------------- model & data quality
+
+Model MAPE % = DIVIDE ( MAX ( bi_model_run[mape] ), 100 )
+Naive MAPE % = DIVIDE ( MAX ( bi_model_run[naive_mape] ), 100 )
+Error vs naive = DIVIDE ( [Model MAPE %] - [Naive MAPE %], [Naive MAPE %] )
+
+Rows Read = SUM ( bi_ingestion_run[rows_read] )
+Rows Rejected = SUM ( bi_ingestion_run[rows_rejected] )
+Rejection Rate = DIVIDE ( [Rows Rejected], [Rows Read] )

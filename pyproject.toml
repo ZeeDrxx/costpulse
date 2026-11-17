@@ -1,0 +1,27 @@
+[project]
+name = "costpulse"
+version = "0.1.0"
+description = "Price observatory: clean public price data, track inflation by city and month, forecast the next quarter."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+  "Django>=5.2,<6",
+  "djangorestframework>=3.16",
+  "pandas>=2.2",
+  "numpy>=2.0",
+  "scikit-learn>=1.5",
+  "psycopg[binary]>=3.2",
+  "gunicorn>=23",
+  "whitenoise>=6.7",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-django>=4.9"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["tests"]

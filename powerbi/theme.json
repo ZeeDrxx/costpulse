@@ -1,0 +1,10 @@
+{
+  "name": "CostPulse",
+  "dataColors": ["#1F4E79", "#C0504D", "#2E7D4F", "#D08C2E", "#6B4C9A", "#3A8FB7", "#8C6D46", "#7A7A72"],
+  "background": "#FFFFFF",
+  "foreground": "#1D1D1B",
+  "tableAccent": "#1F4E79",
+  "good": "#2E7D4F",
+  "neutral": "#D08C2E",
+  "bad": "#B03A2E"
+}

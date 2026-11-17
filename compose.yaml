@@ -1,0 +1,39 @@
+# Local stack: PostgreSQL + Django on http://localhost:8000
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: costpulse
+      POSTGRES_USER: costpulse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-costpulse}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U costpulse -d costpulse"]
+      interval: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"   # for Power BI Desktop on this machine; never public
+
+  web:
+    build: .
+    image: costpulse
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-costpulse}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
+      DEMO_DATA: ${DEMO_DATA:-1}
+    volumes:
+      - rawdata:/app/data/raw
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
+  rawdata:

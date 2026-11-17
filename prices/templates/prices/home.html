@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CostPulse</title>
+  <style>
+    :root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#6b6b66; --line:#e4e1d8; --accent:#1f4e79; --up:#b03a2e; --down:#2e7d4f; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#141413; --fg:#ecebe6; --muted:#9c9b94; --line:#2c2b28; --accent:#7fb0dc; --up:#e2786c; --down:#7cc49a; } }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { margin:0; font-size: 28px; } .lede { color:var(--muted); margin: 4px 0 24px; }
+    .grid { display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 24px; }
+    .card { border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+    .card b { display:block; font-size:22px; } .card span { color:var(--muted); font-size:13px; }
+    table { width:100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align:right; padding:8px 6px; border-bottom:1px solid var(--line); }
+    th:first-child, td:first-child { text-align:left; } th { color:var(--muted); font-weight:500; font-size:13px; }
+    .up { color:var(--up); } .down { color:var(--down); }
+    select { font: inherit; padding: 4px 8px; background: var(--bg); color: var(--fg); border:1px solid var(--line); border-radius:6px; }
+    .row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin: 32px 0 8px; flex-wrap: wrap; }
+    .note { color:var(--muted); font-size:13px; margin-top: 24px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>CostPulse</h1>
+  <p class="lede">Prices and inflation by city and month: cleaned from raw sources, indexed, forecast.</p>
+
+  <div class="grid">
+    <div class="card"><b>{{ observations }}</b><span>monthly prices</span></div>
+    <div class="card"><b>{{ cities|length }}</b><span>cities</span></div>
+    <div class="card"><b id="nat-yoy">–</b><span>national inflation, year on year</span></div>
+    {% if model %}<div class="card"><b>{{ model.mape|floatformat:1 }}%</b><span>forecast error (naive: {{ model.naive_mape|floatformat:1 }}%)</span></div>{% endif %}
+  </div>
+
+  <div class="row"><h2>Latest month</h2></div>
+  <table id="latest"><thead><tr><th>City</th><th>Month</th><th>Index</th><th>MoM</th><th>YoY</th></tr></thead><tbody></tbody></table>
+
+  <div class="row">
+    <h2>Price index</h2>
+    <select id="city"><option value="national">National</option>{% for c in cities %}<option value="{{ c.slug }}">{{ c.name }}</option>{% endfor %}</select>
+  </div>
+  <canvas id="chart" height="120" aria-label="Price index over time"></canvas>
+
+  <p class="note">
+    API: <a href="/api/">/api/</a> · Index base = 100 at the first fully priced month.
+    {% if last_ingest %}Last import: {{ last_ingest.started_at|date:"Y-m-d" }}.{% endif %}
+    Demo deployments run on synthetic sample data.
+  </p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const fmt = (v, d = 1) => v === null ? "–" : v.toFixed(d);
+const cls = v => v === null ? "" : v > 0 ? "up" : "down";
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+fetch("/api/inflation/latest/").then(r => r.json()).then(rows => {
+  const tbody = document.querySelector("#latest tbody");
+  for (const r of rows) {
+    if (r.city === "national") document.getElementById("nat-yoy").textContent = fmt(r.yoy) + "%";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.city}</td><td>${r.month}</td><td>${fmt(r.index)}</td>
+      <td class="${cls(r.mom)}">${fmt(r.mom)}%</td><td class="${cls(r.yoy)}">${fmt(r.yoy)}%</td>`;
+    tbody.appendChild(tr);
+  }
+});
+
+let chart;
+function draw(city) {
+  fetch(`/api/index/?city=${city}`).then(r => r.json()).then(({ series }) => {
+    const data = { labels: series.map(p => p.month),
+      datasets: [{ label: "Index", data: series.map(p => p.index), borderColor: css("--accent"),
+                   pointRadius: 0, borderWidth: 2, tension: 0.2 }] };
+    if (chart) { chart.data = data; chart.update(); return; }
+    chart = new Chart(document.getElementById("chart"), { type: "line", data,
+      options: { plugins: { legend: { display: false } }, interaction: { mode: "index", intersect: false },
+        scales: { x: { ticks: { color: css("--muted"), maxTicksLimit: 12 }, grid: { color: css("--line") } },
+                  y: { ticks: { color: css("--muted") }, grid: { color: css("--line") } } } } });
+  });
+}
+document.getElementById("city").addEventListener("change", e => draw(e.target.value));
+draw("national");
+</script>
+</body>
+</html>

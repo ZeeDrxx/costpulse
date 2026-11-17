@@ -1,0 +1,26 @@
+# Production overlay for a single VPS (see deploy/ovh.md):
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+services:
+  db:
+    restart: unless-stopped   # port stays bound to 127.0.0.1 only: reach it through an SSH tunnel
+
+  web:
+    environment:
+      DJANGO_DEBUG: "0"
+      DEMO_DATA: ${DEMO_DATA:-0}
+    ports: !reset []
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [web]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
